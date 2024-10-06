@@ -8,7 +8,7 @@
 - Offering dry run mode to preview actions without making changes.
 - Allowing custom paths for `jdupes` binary and hash database.
 
-**This script takes destructive actions. Do not trust it. This wrapper was originally designed to fit my particular use case. Read and understand the code before using it. Usage of this script is at your own risk. Always back up important data before performing operations.**
+**This script takes destructive actions. Do not trust it. This wrapper was originally designed to fit my particular use case. Read and understand the code before using it. Usage of this script is at your own risk. Always back up important data before performing any operations.**
 
 ## Table of Contents
 
