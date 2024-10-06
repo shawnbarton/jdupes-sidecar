@@ -33,7 +33,7 @@
 ## Prerequisites
 
 - **Python 3**: The script requires Python 3.6 or newer.
-- **jdupes**: Ensure you have `jdupes` installed on your system.
+- **jdupes**: Ensure you have `jdupes` installed on your system. Tested with jdupes-1.27.3.
 - **tqdm Module**: Used for displaying progress bars. Install via `apt` or `pip`.
 
 ## Installation
