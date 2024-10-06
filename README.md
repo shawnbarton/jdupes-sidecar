@@ -40,14 +40,7 @@
 
 ### 1. Install `jdupes`
 
-Install `jdupes` using `apt`:
-
-```bash
-sudo apt update
-sudo apt install jdupes
-```
-
-Or compile from source by following instructions on the [jdupes GitHub repository](https://github.com/jbruchon/jdupes).
+Follow the instructions on the [jdupes Codeberg repository](https://codeberg.org/jbruchon/jdupes) (formerly: [jdupes GitHub repository](https://github.com/jbruchon/jdupes)).
 
 ### 2. Install `tqdm` Module
 
