@@ -1,12 +1,11 @@
 
 # jdupes-sidecar.py
 
-**jdupes-sidecar.py** is a Python script that automates file deduplication using [`jdupes`](https://github.com/jbruchon/jdupes) on Ubuntu systems. It extends `jdupes` functionality by:
+**jdupes-sidecar.py** is a Python script that automates file deduplication using [`jdupes`](https://github.com/jbruchon/jdupes) (on Linux systems). It extends `jdupes` functionality by:
 
 - Preserving the order of directories when deciding which duplicates to keep.
 - Creating sidecar files that record the paths of deleted duplicates.
 - Offering dry run mode to preview actions without making changes.
-- Providing verbosity levels and progress display.
 - Allowing custom paths for `jdupes` binary and hash database.
 
 ## Table of Contents
