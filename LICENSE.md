@@ -1,4 +1,4 @@
-This repository does not yet contain a license. This project and its code is only to be used for non-commercial purposes until further notice.
+This repository does not yet contain a license. This project and its code are only to be used for non-commercial purposes until further notice.
 
 This project requires the following files from other authors;
 see their respective license headers for more details:
