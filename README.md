@@ -8,6 +8,8 @@
 - Offering dry run mode to preview actions without making changes.
 - Allowing custom paths for `jdupes` binary and hash database.
 
+**This script takes destructive actions. Do not trust it. This wrapper was originally designed to fit my particular use case. Read and understand the code before using it. Usage of this script is at your own risk. Always back up important data before performing operations.**
+
 ## Table of Contents
 
 - [Features](#features)
@@ -157,7 +159,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
   - Improves performance for large datasets.
   - Ensure you have permissions to read/write the hash database file.
 - **Safety Measures**:
-  - The script prompts for confirmation in normal mode.
+  - The script prompts for once for initial confirmation in normal mode.
   - Includes error handling for file operations and `jdupes` execution.
 - **Dependencies**:
   - Requires `jdupes` to be installed and accessible.
@@ -165,20 +167,8 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 
 ## Contributing
 
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch: `git checkout -b feature/your-feature`.
-3. Commit your changes: `git commit -am 'Add your feature'`.
-4. Push to the branch: `git push origin feature/your-feature`.
-5. Submit a pull request.
-
-Please ensure your code follows the project's coding standards and includes appropriate documentation.
+Contributions are welcome!
 
 ## License
 
 See the [LICENSE](LICENSE) file for details.
-
----
-
-**Disclaimer**: Use this script at your own risk. Always back up important data before performing operations that modify or delete files.
