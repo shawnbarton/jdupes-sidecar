@@ -93,7 +93,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 - `-v`, `--verbose`: Increase output verbosity. Can be used multiple times (`-v`, `-vv`, `-vvv`).
 - `--progress`: Display progress information.
 - `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
-- `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. WARNING: Make sure you understand the quirks, limitations, and expirimental nature of this jdupes feature.
+- `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. WARNING: Make sure you understand the quirks, limitations, and experimental nature of this jdupes feature.
 - `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
 - `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
 - `-h`, `--help`: Show help message and exit.
