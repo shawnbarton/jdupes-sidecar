@@ -93,7 +93,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 - `-v`, `--verbose`: Increase output verbosity. Can be used multiple times (`-v`, `-vv`, `-vvv`).
 - `--progress`: Display progress information.
 - `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
-- `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`.
+- `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. WARNING: Make sure you understand the quirks, limitations, and expirimental nature of this jdupes feature.
 - `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
 - `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
 - `-h`, `--help`: Show help message and exit.
@@ -150,7 +150,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 
 ## Notes and Considerations
 
-- **Directory Order Matters**: The order of directories provided determines which duplicates are kept. The first directory has the highest priority.
+- **Directory Order Matters**: The order of directories provided determines which duplicates are kept. The first directory has the highest priority. This is because we pass --param-order by default.
 - **Dry Run Mode**: Always recommended to perform a dry run first to verify actions.
 - **Verbosity Levels**:
   - No `-v`: Warnings and errors are displayed.
@@ -164,6 +164,8 @@ Provide the directories you want to deduplicate as arguments. The order of direc
   - Use `--jdupes-hashdb` to specify a hash database file for `jdupes`.
   - Improves performance for large datasets.
   - Ensure you have permissions to read/write the hash database file.
+  - WARNING: Make sure you understand the quirks, limitations, and expirimental nature of this jdupes feature.
+  - See the special notes for this function underneath the table at: https://codeberg.org/jbruchon/jdupes#usage
 - **Safety Measures**:
   - The script prompts once for initial confirmation in normal mode.
   - Includes error handling for file operations and `jdupes` execution.
