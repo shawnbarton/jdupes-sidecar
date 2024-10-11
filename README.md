@@ -42,6 +42,31 @@
 - **jdupes**: Ensure you have `jdupes` installed on your system. Tested with jdupes-1.27.3.
 - **tqdm Module**: Used for displaying progress bars. Install via `apt` or `pip`. Tested with tqdm==4.66.4.
 
+## Usage
+
+### Basic Usage
+
+```bash
+./jdupes-sidecar.py [options] /path/to/dir1 /path/to/dir2 ...
+```
+
+Provide the directories you want to deduplicate as arguments. The order of directories determines which duplicates are kept (first directory has the highest priority).
+
+### Options
+
+- `-n`, `--dry-run`: Perform a dry run without deleting files or creating sidecar files.
+- `-o OUTPUT`, `--output OUTPUT`: Output file for dry run report (default: `dry_run_output.txt`).
+- `-v`, `--verbose`: Increase output verbosity. Can be used multiple times (`-v`, `-vv`, `-vvv`).
+- `--progress`: Display progress information.
+- `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
+- `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. See [WARNING](#notes-and-considerations) below.
+- `--jdupes-extra-cmds JDUPES_EXTRA_CMDS`: Extra parameters to pass through to jdupes.
+- `--sidecar-extension SIDECAR_EXTENSION`: Desired extension of sidecar files (default: `.dupes`).
+- `--no-exclude-sidecar`: Do not exclude sidecar files from the jdupes search.
+- `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
+- `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
+- `-h`, `--help`: Show help message and exit.
+
 ## Installation
 
 ### 1. Install `jdupes`
@@ -76,32 +101,7 @@ wget https://github.com/yourusername/yourrepository/jdupes-sidecar.py
 chmod +x jdupes-sidecar.py
 ```
 
-## Usage
-
-### Basic Usage
-
-```bash
-./jdupes-sidecar.py [options] /path/to/dir1 /path/to/dir2 ...
-```
-
-Provide the directories you want to deduplicate as arguments. The order of directories determines which duplicates are kept (first directory has the highest priority).
-
-### Options
-
-- `-n`, `--dry-run`: Perform a dry run without deleting files or creating sidecar files.
-- `-o OUTPUT`, `--output OUTPUT`: Output file for dry run report (default: `dry_run_output.txt`).
-- `-v`, `--verbose`: Increase output verbosity. Can be used multiple times (`-v`, `-vv`, `-vvv`).
-- `--progress`: Display progress information.
-- `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
-- `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. See [WARNING](#notes-and-considerations) below.
-- `--jdupes-extra-cmds JDUPES_EXTRA_CMDS`: Extra parameters to pass through to jdupes.
-- `--sidecar-extension SIDECAR_EXTENSION`: Desired extension of sidecar files (default: `.dupes`).
-- `--no-exclude-sidecar`: Do not exclude sidecar files from the jdupes search.
-- `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
-- `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
-- `-h`, `--help`: Show help message and exit.
-
-### Examples
+### Usage Examples
 
 #### 1. Dry Run Mode with Default Verbosity
 
