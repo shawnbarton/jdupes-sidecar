@@ -93,8 +93,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 - `-v`, `--verbose`: Increase output verbosity. Can be used multiple times (`-v`, `-vv`, `-vvv`).
 - `--progress`: Display progress information.
 - `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
-- `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`.
-  - WARNING: Make sure you understand the quirks, limitations, and experimental nature of this jdupes feature.
+- `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. See [WARNING](#notes-and-considerations) below.
 - `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
 - `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
 - `-h`, `--help`: Show help message and exit.
@@ -166,7 +165,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
   - Improves performance for large datasets.
   - Ensure you have permissions to read/write the hash database file.
   - WARNING: Make sure you understand the quirks, limitations, and expirimental nature of this jdupes feature.
-  - See the special notes for this function underneath the table at: https://codeberg.org/jbruchon/jdupes#usage
+    - See the special notes for this function underneath the table at: https://codeberg.org/jbruchon/jdupes#usage
 - **Safety Measures**:
   - The script prompts once for initial confirmation in normal mode.
   - Includes error handling for file operations and `jdupes` execution.
