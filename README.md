@@ -1,13 +1,13 @@
 
 # jdupes-sidecar.py
 
-**jdupes-sidecar.py** is a Python script that extends [jdupes](https://jdupes.com) file deduplication features (on Linux systems) with sidecar file functionalities. It extends `jdupes` functionality by:
+**jdupes-sidecar.py** is a Python script that extends [jdupes](https://jdupes.com) (on Linux systems) functionality by:
 
-- Preserving the order of directories when deciding which duplicates to keep.
 - Creating and managing sidecar files that record the paths of deleted duplicates.
-- Offering dry run mode to preview actions without making changes.
 - Providing customizable behavior for handling existing sidecar files and deleting sidecar files of deleted duplicates.
-- Allowing custom paths for `jdupes` binary and hash database.
+- Offering dry run mode to preview actions without making changes.
+- By default preserving the order of directories when deciding which duplicates to keep.
+- Providing direct parameters for custom paths to the `jdupes` binary and hash database.
 
 **This script takes destructive actions. Do not trust it. This wrapper was originally designed to fit my particular use case. Read and understand the code before using it. Usage of this script is at your own risk. Always back up important data before performing any operations.**
 
@@ -94,6 +94,9 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 - `--progress`: Display progress information.
 - `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
 - `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. See [WARNING](#notes-and-considerations) below.
+- `--jdupes-extra-cmds JDUPES_EXTRA_CMDS`: Extra parameters to pass through to jdupes.
+- `--sidecar-extension SIDECAR_EXTENSION`: Desired extension of sidecar files (`default: .dupes`).
+- `--no-exclude-sidecar`: Do not exclude sidecar files from the jdupes search.
 - `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
 - `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
 - `-h`, `--help`: Show help message and exit.
