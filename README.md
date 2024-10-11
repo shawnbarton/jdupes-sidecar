@@ -62,7 +62,8 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 - `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. See [WARNING](#notes-and-considerations) below.
 - `--jdupes-extra-cmds JDUPES_EXTRA_CMDS`: Extra parameters to pass through to jdupes.
 - `--sidecar-extension SIDECAR_EXTENSION`: Desired extension of sidecar files (default: `.dupes`).
-- `--no-exclude-sidecar`: Do not exclude sidecar files from the jdupes search.
+  - Note: Sidecar files are excluded from the jdupes search by default. We achieve this using the jdupes parameter `--ext-filter SIDECAR_EXTENSION`.
+- `--no-exclude-sidecar`: Do not exclude sidecar files from the jdupes search ( jdupes parameter ). 
 - `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
 - `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
 - `-h`, `--help`: Show help message and exit.
