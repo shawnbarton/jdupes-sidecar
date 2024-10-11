@@ -4,8 +4,9 @@
 **jdupes-sidecar.py** is a Python script that automates file deduplication using [jdupes](https://jdupes.com) (on Linux systems). It extends `jdupes` functionality by:
 
 - Preserving the order of directories when deciding which duplicates to keep.
-- Creating sidecar files that record the paths of deleted duplicates.
+- Creating and managing sidecar files that record the paths of deleted duplicates.
 - Offering dry run mode to preview actions without making changes.
+- Providing customizable behavior for handling existing sidecar files and deleting sidecar files of deleted duplicates.
 - Allowing custom paths for `jdupes` binary and hash database.
 
 **This script takes destructive actions. Do not trust it. This wrapper was originally designed to fit my particular use case. Read and understand the code before using it. Usage of this script is at your own risk. Always back up important data before performing any operations.**
@@ -27,10 +28,13 @@
 
 - **Directory Order Preservation**: Uses `--param-order` with `jdupes` to consider the order of directories provided when deciding which duplicate file to keep.
 - **Sidecar Files**: Creates a `.dupes` sidecar file alongside the surviving file, listing the full paths of the deleted duplicates.
+- **Sidecar Merging**: Merges existing sidecar files from deleted duplicates into the surviving file's sidecar file (default behavior).
+- **Sidecar Deletion**: Deletes the sidecar files of deleted duplicates after merging them (default behavior, can be disabled with `--no-delete-duplicate-sidecar`).
 - **Dry Run Mode**: Allows you to preview actions without deleting files or creating sidecar files.
 - **Verbosity Levels**: Adjustable verbosity to control the amount of output.
 - **Progress Display**: Shows real-time progress from `jdupes` and progress bars for processing duplicates.
 - **Customizable `jdupes` Options**: Specify custom paths for `jdupes` binary and hash database.
+- **Merge/Do Not Merge Existing Sidecars**: Choose whether to merge existing sidecar files of duplicate files with the surviving file's sidecar (can be disabled with `--no-merge-existing-sidecars`).
 
 ## Prerequisites
 
@@ -90,6 +94,8 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 - `--progress`: Display progress information.
 - `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
 - `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`.
+- `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
+- `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
 - `-h`, `--help`: Show help message and exit.
 
 ### Examples
@@ -159,7 +165,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
   - Improves performance for large datasets.
   - Ensure you have permissions to read/write the hash database file.
 - **Safety Measures**:
-  - The script prompts for once for initial confirmation in normal mode.
+  - The script prompts once for initial confirmation in normal mode.
   - Includes error handling for file operations and `jdupes` execution.
 - **Dependencies**:
   - Requires `jdupes` to be installed and accessible.
