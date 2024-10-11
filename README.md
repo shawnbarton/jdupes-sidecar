@@ -95,7 +95,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 - `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
 - `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. See [WARNING](#notes-and-considerations) below.
 - `--jdupes-extra-cmds JDUPES_EXTRA_CMDS`: Extra parameters to pass through to jdupes.
-- `--sidecar-extension SIDECAR_EXTENSION`: Desired extension of sidecar files (`default: .dupes`).
+- `--sidecar-extension SIDECAR_EXTENSION`: Desired extension of sidecar files (default: `.dupes`).
 - `--no-exclude-sidecar`: Do not exclude sidecar files from the jdupes search.
 - `--no-merge-existing-sidecars`: Do not merge existing sidecar files from deletion candidates.
 - `--no-delete-duplicate-sidecar`: Do not delete the sidecar files of deleted duplicate files after merging.
@@ -131,25 +131,6 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 
 - Displays real-time progress from `jdupes`.
 - Shows a progress bar for processing duplicates.
-
-#### 4. Specify Custom `jdupes` Path and Hash Database
-
-```bash
-./jdupes-sidecar.py --jdupes-path /usr/local/bin/jdupes --jdupes-hashdb /var/hashdb.txt /path/to/dir1 /path/to/dir2
-```
-
-- Uses a custom `jdupes` binary.
-- Specifies a hash database for `jdupes`.
-
-#### 5. Full Command with All Options
-
-```bash
-./jdupes-sidecar.py --jdupes-path /usr/local/bin/jdupes --jdupes-hashdb /var/hashdb.txt --progress -vv -o report.txt /path/to/dir1 /path/to/dir2
-```
-
-- Uses custom `jdupes` path and hash database.
-- Displays progress and sets verbosity to DEBUG level.
-- Outputs dry run report to `report.txt`.
 
 ## Notes and Considerations
 
