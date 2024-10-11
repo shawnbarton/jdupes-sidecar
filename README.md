@@ -148,7 +148,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
   - Use `--jdupes-hashdb` to specify a hash database file for `jdupes`.
   - Improves performance for large datasets.
   - Ensure you have permissions to read/write the hash database file.
-  - **WARNING: Make sure you understand the quirks, limitations, and expirimental nature of this jdupes feature.**
+  - **WARNING: Make sure you understand the quirks, limitations, and experimental nature of this jdupes feature.**
     - See the special notes for this function underneath the table at: https://codeberg.org/jbruchon/jdupes#usage
 - **Safety Measures**:
   - The script prompts once for initial confirmation in normal mode.
