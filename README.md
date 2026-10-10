@@ -41,7 +41,7 @@ For example, after `./jdupes-sidecar.py /photos /backup/photos /old-laptop` find
 /old-laptop/IMG_0001.jpg
 ```
 
-Sidecar files are plain text with one absolute path per line. File names are written byte-for-byte as they are on disk.
+Sidecar files are plain text with one absolute path per line. Paths are recorded with symlinked directories resolved (so `~/Pictures/x.jpg` is recorded as `/mnt/data/Pictures/x.jpg` if `~/Pictures` is a symlink to `/mnt/data/Pictures`), and file names are written byte-for-byte as they are on disk.
 
 ## Features
 
@@ -108,7 +108,7 @@ chmod +x jdupes-sidecar.py
 ./jdupes-sidecar.py [options] /path/to/dir1 /path/to/dir2 ...
 ```
 
-Provide the directories you want to deduplicate as arguments. The order of directories determines which duplicates are kept (first directory has the highest priority). Directories may overlap (for example `/data` and `/data/archive`); a file counts as part of the first directory listed that contains it.
+Provide the directories you want to deduplicate as arguments (`jdupes` does not accept individual files). The order of directories determines which duplicates are kept (first directory has the highest priority). Directories may overlap (for example `/data` and `/data/archive`); a file counts as part of the first directory listed that contains it.
 
 ### Options
 
@@ -119,7 +119,7 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 - `--progress`: Display progress from `jdupes` while it scans, and a progress bar while duplicates are processed (the bar needs `tqdm`).
 - `--jdupes-path JDUPES_PATH`: Path to the `jdupes` binary (default: `jdupes`).
 - `--jdupes-hashdb JDUPES_HASHDB`: Path to the hash database file to be used by `jdupes`. See [the warning](#notes-and-considerations) below.
-- `--jdupes-extra-args JDUPES_EXTRA_ARGS`: Extra options to pass through to `jdupes`, such as `--no-hidden` or `--zero-match`. Write it as `--jdupes-extra-args="..."`, with the `=`, so that a value starting with `-` is not mistaken for an option of this script. Options that make `jdupes` act on files itself or change its output are rejected; see [Notes and Considerations](#notes-and-considerations). (Formerly `--jdupes-extra-cmds`, which still works.)
+- `--jdupes-extra-args JDUPES_EXTRA_ARGS`: Extra options to pass through to `jdupes`, such as `--no-hidden` or `--zero-match`. Write it as `--jdupes-extra-args="..."`, with the `=`, so that a value starting with `-` is not mistaken for an option of this script. Only options that affect which files are compared are accepted; see [Notes and Considerations](#notes-and-considerations). (Formerly `--jdupes-extra-cmds`, which still works.)
 - `--sidecar-extension SIDECAR_EXTENSION`: Extension of sidecar files (default: `.dupes`). It must be a single extension made of letters, digits, `_` or `-`, because `jdupes` can only exclude files by their last extension.
 - `--no-exclude-sidecar`: Do not exclude sidecar files from the `jdupes` search. By default they are excluded with the `jdupes` option `--ext-filter=noext:EXTENSION`, which ignores case.
 - `--no-merge-existing-sidecars`: Do not merge existing sidecar files of deleted duplicates; leave them where they are.
@@ -167,14 +167,15 @@ Provide the directories you want to deduplicate as arguments. The order of direc
 
 Before deleting a duplicate, the script checks that:
 
-- The kept file still exists.
+- Neither the duplicate nor the kept file has changed since the scan (same size, modification time and inode), for example while the confirmation question was waiting for an answer.
+- The duplicate is the same size as the kept file. A different size means one of them changed during the scan.
 - The duplicate is not the kept file itself under another path, or a hard link to it. Such files are left alone: deleting them would reclaim no space, or would delete the kept file.
-- The duplicate is the same size as the kept file. A different size means one of them changed after `jdupes` scanned it.
-- The sidecar file of the duplicate, if it is to be merged, can be read.
+- If the duplicate has a sidecar file to merge, it can be read and looks like a sidecar file (one absolute path per line). Any other file that happens to have the sidecar name is left alone, along with the duplicate.
+- Neither the kept file's sidecar file nor the duplicate's is itself one of the duplicates found (only possible with `--no-exclude-sidecar`).
 - The duplicate's path contains no newline, which a sidecar file could not record.
 - The kept file's sidecar file can be opened for writing. If not, nothing in that set is deleted.
 
-A duplicate is only deleted if all of these hold, and its path is recorded in the sidecar file as soon as it is deleted. Merged sidecar files are only deleted after their contents have been written.
+A duplicate is only deleted if all of these hold. Its path is recorded in the sidecar file as soon as it is deleted; Ctrl-C and termination signals are held back until both have happened. Merged sidecar files are only deleted after their contents have been written. Anything skipped, other than another name for the kept file, is reported and makes the script exit with status 1.
 
 ## Notes and Considerations
 
@@ -184,7 +185,7 @@ A duplicate is only deleted if all of these hold, and its path is recorded in th
   - No `-v`: Warnings and errors are displayed.
   - `-v`: Each action taken is listed.
   - `-vv` or higher: Debug information, such as the `jdupes` command line, is also shown.
-- **Options Passed to jdupes**: `--jdupes-extra-args` rejects options that would make `jdupes` act on files itself and bypass the sidecar files (such as `--delete`, `--link-hard` or `--dedupe`), or change the output this script reads (such as `--json`, `--size` or `--omit-first`). It also rejects `--partial-only`, which is unsafe for deletion, and plain paths: give directories as normal arguments instead. `--quick` is allowed but prints a warning, since it skips the byte-for-byte comparison of files.
+- **Options Passed to jdupes**: `--jdupes-extra-args` accepts only these `jdupes` options, which affect which files are compared and how: `-@`/`--loud`, `-0`/`--print-null`, `-1`/`--one-file-system`, `-A`/`--no-hidden`, `-C`/`--chunk-size`, `-H`/`--hard-links`, `-i`/`--reverse`, `-I`/`--isolate`, `-o`/`--order`, `-O`/`--param-order`, `-p`/`--permissions`, `-q`/`--quiet`, `-Q`/`--quick`, `-r`/`--recurse`, `-s`/`--symlinks`, `-t`/`--no-change-check`, `-U`/`--no-trav-check`, `-X`/`--ext-filter`, `-y`/`--hash-db`, `-z`/`--zero-match` and `-Z`/`--soft-abort`. Everything else is rejected, because it would make `jdupes` act on files itself and bypass the sidecar files (such as `--delete` or `--link-hard`), change the output this script reads (such as `--json` or `--omit-first`), or make matches unsafe to delete (`--partial-only`). Arguments are read exactly as `jdupes` reads them, including abbreviated long options such as `--zero` and option values. Plain paths are rejected too: give directories as normal arguments instead. `--quick` prints a warning, since it skips the byte-for-byte comparison of files.
 - **Permissions**:
   - Ensure you have read/write/delete permissions for the specified directories.
   - When running with `sudo` and `--progress`, make sure `tqdm` is installed for the root user.

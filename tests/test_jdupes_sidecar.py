@@ -8,6 +8,7 @@ use the `jdupes` on PATH, or the binary named by the JDUPES environment variable
 import importlib.util
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -71,6 +72,11 @@ class ParseJdupesOutputTest(unittest.TestCase):
         self.assertEqual(self.parse(b'No duplicates found.\n'), [])
         self.assertEqual(self.parse(b''), [])
 
+    def test_other_text_is_an_error(self):
+        # Such as the help text printed for `-X help`.
+        with self.assertRaises(jdupes_sidecar.FatalError):
+            self.parse(b'Extension filters:\n  size+:SIZE ...\n')
+
     def test_unexpected_text_after_entries_is_an_error(self):
         with self.assertRaises(jdupes_sidecar.FatalError):
             self.parse(b'a\0b\0\n1 duplicate files (in 1 sets), occupying 5 bytes\n')
@@ -121,17 +127,33 @@ class CheckExtraArgsTest(unittest.TestCase):
         for args in (['-A', '-z'], ['-X', 'noext:txt'], ['-Xnoext:dmfe'], ['--ext-filter', 'size+:1k'],
                      ['--ext-filter=noext:mp3'], ['--order', 'time'], ['-io', 'time'], ['-rQ'],
                      ['--quick'], ['--hash-db', 'x.db'], ['--hash-db=x.db'], ['-1', '-s', '-H', '-p'],
-                     ['--recurse:'], ['--no-hidden'], ['--print-null']):
+                     ['--no-hidden'], ['--no-h'], ['--zero'], ['--print-null'], ['-C', '16'], ['-tUZ@']):
             with self.subTest(args=args):
                 self.assertIsNone(self.check(args))
 
     def test_forbidden(self):
         for args in (['-d'], ['-rdN'], ['-L'], ['-l'], ['-B'], ['-m'], ['-M'], ['-u'], ['-e'], ['-f'],
-                     ['-S'], ['-P', 'early'], ['-j'], ['-T'], ['-Y'], ['-v'], ['-h'],
-                     ['--delete'], ['--del'], ['--li'], ['--json'], ['--print=early'], ['--size'],
-                     ['--omit-first'], ['--hash-db-populate'], ['--partial-only'], ['-A', '--summarize']):
+                     ['-S'], ['-P', 'early'], ['-j'], ['-T'], ['-Y'], ['-v'], ['-h'], ['-R'], ['-b', 'x'],
+                     ['-D'], ['-E'], ['-K'], ['-V'], ['-9'], ['-x'], ['--delete'], ['--del'], ['--json'],
+                     ['--print=early'], ['--size'], ['--omit-first'], ['--hash-db-populate=x'],
+                     ['--partial-only'], ['--recurse:'], ['-A', '--summarize']):
             with self.subTest(args=args):
                 self.assertIn('not supported', self.check(args))
+
+    def test_invalid(self):
+        for args in (['--li'], ['--recur'], ['--no'], ['--nonexistent'], ['--zero-match=1'],
+                     ['-C'], ['-X'], ['-rX'], ['--order'], ['--chunk']):
+            with self.subTest(args=args):
+                self.assertIsNotNone(self.check(args))
+
+    def test_values_are_read_as_jdupes_reads_them(self):
+        # In each of these, jdupes takes '-o' as the value of the option before it, so
+        # '-dN' is an option (--delete --no-prompt), not the value of -o.
+        for args in (['--chunk', '-o', '-dN'], ['--chunk-s', '-o', '-dN'], ['-C', '-o', '-dN'],
+                     ['-b', '-o', '-dN'], ['--hash-db-opts', '-o', '-dN'], ['--hash', '-o', '-dN']):
+            with self.subTest(args=args):
+                self.assertIsNotNone(self.check(args))
+        self.assertIn('-d (--delete)', self.check(['--chunk', '-o', '-dN']))
 
     def test_positional_arguments_are_rejected(self):
         for args in (['somedir'], ['-A', 'somedir'], ['--'], ['-']):
@@ -139,8 +161,8 @@ class CheckExtraArgsTest(unittest.TestCase):
                 self.assertIn('not an option', self.check(args))
 
     def test_split_options(self):
-        args = ['-rQ', '-X', 'noext:d', '-Cd', '--order=time', '--hash-db', 'f']
-        self.assertEqual(jdupes_sidecar.split_options(args), ['r', 'Q', 'X', 'C', '--order', '--hash-db'])
+        args = ['-rQ', '-X', 'noext:d', '-Cd', '--order=time', '--hash-db', 'f', '--quic', '--chunk', '-o']
+        self.assertEqual(jdupes_sidecar.split_options(args), ['r', 'Q', 'X', 'C', 'o', 'y', 'Q', 'C'])
 
 
 class ParseArgsTest(unittest.TestCase):
@@ -183,19 +205,45 @@ class ProcessSetTest(TempDirTestCase):
         args.__dict__.update(overrides)
         return args
 
-    def process(self, keep, dupes, **overrides):
+    def process(self, keep, dupes, scan=None, **overrides):
+        if scan is None:
+            scan = jdupes_sidecar.snapshot([keep] + dupes)
         with self.assertLogs(jdupes_sidecar.log, 'DEBUG') as logs:
             jdupes_sidecar.log.debug('start')
-            result = jdupes_sidecar.process_set(keep, dupes, self.args(**overrides), [])
+            result = jdupes_sidecar.process_set(keep, dupes, self.args(**overrides), [], scan)
         return result, '\n'.join(logs.output)
 
+    def change(self, path, content):
+        """Rewrite a file, making sure its modification time changes."""
+        mtime = os.stat(path).st_mtime_ns
+        with open(path, 'w') as f:
+            f.write(content)
+        os.utime(path, ns=(mtime + 10 ** 9, mtime + 10 ** 9))
+
     def test_duplicate_that_changed_size_is_not_deleted(self):
-        keep, dupe = self.write('a/f'), self.write('b/f', 'changed after the scan\n')
+        keep, dupe = self.write('a/f'), self.write('b/f', 'changed during the scan\n')
         result, logs = self.process(keep, [dupe])
         self.assertEqual(result, (0, 1))
         self.assertTrue(os.path.exists(dupe))
         self.assertIn('size differs', logs)
         self.assertFalse(os.path.exists(keep + '.dupes'))
+
+    def test_duplicate_that_changed_after_the_scan_is_not_deleted(self):
+        keep, dupe = self.write('a/f', 'draft-1\n'), self.write('b/f', 'draft-1\n')
+        scan = jdupes_sidecar.snapshot([keep, dupe])
+        self.change(dupe, 'final-2\n')
+        result, logs = self.process(keep, [dupe], scan)
+        self.assertEqual(result, (0, 1))
+        self.assertEqual(self.read('b/f'), b'final-2\n')
+        self.assertIn('changed after the scan', logs)
+
+    def test_nothing_is_deleted_if_kept_file_changed_after_the_scan(self):
+        keep, dupe = self.write('a/f', 'draft-1\n'), self.write('b/f', 'draft-1\n')
+        scan = jdupes_sidecar.snapshot([keep, dupe])
+        self.change(keep, 'final-2\n')
+        result, logs = self.process(keep, [dupe], scan)
+        self.assertEqual(result, (0, 1))
+        self.assertTrue(os.path.exists(dupe))
 
     def test_nothing_is_deleted_if_kept_file_is_gone(self):
         dupe = self.write('b/f')
@@ -218,12 +266,31 @@ class ProcessSetTest(TempDirTestCase):
         self.assertIn('same file', logs)
         self.assertFalse(os.path.exists(keep + '.dupes'))
 
+    def test_existing_sidecar_is_merged_verbatim(self):
+        keep, dupe = self.write('a/f'), self.write('b/f')
+        self.write('b/f.dupes', b'/old/caf\xe9\n/old/two\n')
+        result, _ = self.process(keep, [dupe])
+        self.assertEqual(result, (1, 0))
+        self.assertEqual(self.read('a/f.dupes'), dupe.encode() + b'\n/old/caf\xe9\n/old/two\n')
+
+    def test_file_that_is_not_a_sidecar_is_left_alone(self):
+        for content in ('old line 1\n\nold line 3', 'relative/path\n', '/no/final/newline', '/a\n\n'):
+            with self.subTest(content=content):
+                keep, dupe = self.write('a/f'), self.write('b/f')
+                self.write('b/f.dupes', content)
+                result, logs = self.process(keep, [dupe])
+                self.assertEqual(result, (0, 1))
+                self.assertTrue(os.path.exists(dupe))
+                self.assertEqual(self.read('b/f.dupes'), content.encode())
+                self.assertIn('does not look like a sidecar file', logs)
+
     def test_dry_run_changes_nothing(self):
         keep, dupe = self.write('a/f'), self.write('b/f')
         self.write('b/f.dupes', '/old/path\n')
         before = self.snapshot()
         report = []
-        result = jdupes_sidecar.process_set(keep, [dupe], self.args(dry_run=True), report)
+        scan = jdupes_sidecar.snapshot([keep, dupe])
+        result = jdupes_sidecar.process_set(keep, [dupe], self.args(dry_run=True), report, scan)
         self.assertEqual(result, (1, 0))
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(report, [
@@ -236,6 +303,22 @@ class ProcessSetTest(TempDirTestCase):
             "  /old/path",
             "",
         ])
+
+
+class SignalsDeferredTest(unittest.TestCase):
+    def test_ctrl_c_waits_for_the_block(self):
+        finished = False
+        with self.assertRaises(KeyboardInterrupt):
+            with jdupes_sidecar.signals_deferred():
+                os.kill(os.getpid(), signal.SIGINT)
+                finished = True
+        self.assertTrue(finished)
+        self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)
+
+    def test_no_signal(self):
+        with jdupes_sidecar.signals_deferred():
+            pass
+        self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)
 
 
 @unittest.skipUnless(JDUPES, 'jdupes is not installed')
@@ -439,6 +522,23 @@ class EndToEndTest(TempDirTestCase):
         self.assertIn('--delete', result.output)
         self.assertExists('b/f')
 
+    def test_extra_args_cannot_smuggle_options_to_jdupes(self):
+        self.write('a/f')
+        self.write('b/f')
+        for extra in ('--chunk -o -dN', '-C -o -dN', '-b -o -dN', '-C'):
+            with self.subTest(extra=extra):
+                result = self.run_script('--yes', '-n', f'--jdupes-extra-args={extra}', 'a', 'b')
+                self.assertEqual(result.returncode, 2, result.output)
+                self.assertExists('b/f')
+
+    def test_jdupes_help_output_is_an_error(self):
+        self.write('a/f')
+        self.write('b/f')
+        result = self.run_script('--yes', '--jdupes-extra-args=-X help', 'a', 'b')
+        self.assertEqual(result.returncode, 1, result.output)
+        self.assertIn('Unexpected output from jdupes', result.output)
+        self.assertExists('b/f')
+
     def test_extra_args_reach_jdupes(self):
         self.write('a/f', '')
         self.write('b/f', '')
@@ -455,10 +555,80 @@ class EndToEndTest(TempDirTestCase):
         self.assertEqual(result.returncode, 0, result.output)
         self.assertNotExists('b/f')
 
+    def test_dot_dot_after_a_symlink(self):
+        # 'lnk/../b' is mnt/data/b, not work/b: the kernel follows the symlink before '..'.
+        self.write('work/a/f', 'photo-v1\n')
+        self.write('mnt/data/b/f', 'photo-v1\n')
+        self.write('work/b/f', 'photo-v2\n')
+        os.makedirs(self.path('mnt/data/sub'))
+        os.symlink('../mnt/data/sub', self.path('work/lnk'))
+        result = subprocess.run([sys.executable, SCRIPT, '--jdupes-path', JDUPES, '--yes', 'a', 'lnk/../b'],
+                                cwd=self.path('work'), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.read('work/b/f'), b'photo-v2\n')
+        self.assertNotExists('mnt/data/b/f')
+        self.assertSidecar('work/a/f.dupes', 'mnt/data/b/f')
+
+    def test_sidecar_name_of_kept_file_is_a_duplicate(self):
+        self.write('d/report')
+        self.write('d/report.bak')
+        result = self.run_script('--yes', '--sidecar-extension=bak', '--no-exclude-sidecar', 'd')
+        self.assertEqual(result.returncode, 1, result.output)
+        self.assertEqual(self.read('d/report.bak'), b'same content\n')
+        self.assertExists('d/report')
+
+    def test_sidecar_name_of_duplicate_is_the_kept_file(self):
+        self.write('d/report')
+        self.write('d/report.bak')
+        result = self.run_script('--yes', '--sidecar-extension=bak', '--no-exclude-sidecar',
+                                 '--jdupes-extra-args=--reverse', 'd')
+        self.assertEqual(result.returncode, 1, result.output)
+        self.assertEqual(self.read('d/report.bak'), b'same content\n')
+        self.assertExists('d/report')
+
+    def test_sidecar_name_of_duplicate_is_in_another_set(self):
+        self.write('a/f', 'F\n')
+        self.write('b/f', 'F\n')
+        self.write('b/f.bak', 'OLD\n')
+        self.write('c/g', 'OLD\n')
+        result = self.run_script('--yes', '--sidecar-extension=bak', '--no-exclude-sidecar', 'a', 'b', 'c')
+        self.assertEqual(result.returncode, 1, result.output)
+        self.assertEqual(self.read('b/f.bak'), b'OLD\n')
+        self.assertNotExists('c/g')
+        self.assertExists('b/f')
+
+    def test_change_while_waiting_for_confirmation(self):
+        self.write('a/doc', 'draft-1\n')
+        self.write('b/doc', 'draft-1\n')
+        process = subprocess.Popen([sys.executable, SCRIPT, '--jdupes-path', JDUPES, 'a', 'b'], cwd=self.tmp,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output = b''
+        while not output.endswith(b'[y/N]: '):
+            data = process.stdout.read(1)
+            self.assertTrue(data, output)
+            output += data
+        mtime = os.stat(self.path('b/doc')).st_mtime_ns
+        self.write('b/doc', 'final-2\n')
+        os.utime(self.path('b/doc'), ns=(mtime + 10 ** 9, mtime + 10 ** 9))
+        output += process.communicate(b'y\n')[0]
+        self.assertEqual(process.returncode, 1, output)
+        self.assertEqual(self.read('b/doc'), b'final-2\n')
+        self.assertIn(b'changed after the scan', output)
+
     def test_missing_directory(self):
         result = self.run_script('--yes', 'nonexistent')
         self.assertEqual(result.returncode, 1, result.output)
-        self.assertIn('No such file or directory: nonexistent', result.output)
+        self.assertIn('Not a directory: nonexistent', result.output)
+
+    def test_file_arguments_are_rejected(self):
+        # jdupes would skip the file with a warning and go on with the other directories.
+        self.write('f')
+        self.write('b/f')
+        self.write('c/f')
+        result = self.run_script('--yes', 'f', 'b', 'c')
+        self.assertEqual(result.returncode, 1, result.output)
+        self.assertIn('Not a directory: f', result.output)
+        self.assertExists('c/f')
 
     def test_jdupes_not_found(self):
         self.write('a/f')

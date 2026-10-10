@@ -5,6 +5,8 @@ recording the paths of the deleted copies in a sidecar file next to it.
 """
 
 import argparse
+import collections
+import contextlib
 import logging
 import os
 import re
@@ -21,33 +23,36 @@ except ImportError:
 
 log = logging.getLogger('jdupes-sidecar')
 
-# jdupes options that must not be passed through --jdupes-extra-args. They either make
-# jdupes act on the duplicates itself (bypassing the sidecar files), change the output
-# this script parses, or make matches unsafe to delete.
-FORBIDDEN_SHORT_OPTIONS = {
-    'B': '--dedupe',
-    'd': '--delete',
-    'e': '--error-on-dupe',
-    'f': '--omit-first',
-    'h': '--help',
-    'j': '--json',
-    'l': '--link-soft',
-    'L': '--link-hard',
-    'm': '--summarize',
-    'M': '--print-summarize',
-    'N': '--no-prompt',
-    'P': '--print',
-    'S': '--size',
-    'T': '--partial-only',
-    'u': '--print-unique',
-    'v': '--version',
-    'Y': '--hash-db-populate',
+# jdupes' long options (1.27.3 to 1.31.2): the short option each one is the same as, and
+# whether it takes a value. Needed to read arguments exactly as jdupes will, including
+# abbreviations such as --chunk for --chunk-size.
+JDUPES_LONG_OPTIONS = {
+    'loud': ('@', False), 'print-null': ('0', False), 'one-file-system': ('1', False),
+    'no-hidden': ('A', False), 'dedupe': ('B', False), 'hash-db-opts': ('b', True),
+    'chunk-size': ('C', True), 'debug': ('D', False), 'delete': ('d', False),
+    'error-on-dupe': ('e', False), 'ext-option': ('E', False), 'omit-first': ('f', False),
+    'hard-links': ('H', False), 'help': ('h', False), 'isolate': ('I', False),
+    'reverse': ('i', False), 'json': ('j', False), 'skip-hash': ('K', False),
+    'link-hard': ('L', False), 'link-soft': ('l', False), 'print-summarize': ('M', False),
+    'summarize': ('m', False), 'no-prompt': ('N', False), 'param-order': ('O', False),
+    'order': ('o', True), 'print': ('P', True), 'permissions': ('p', False),
+    'quick': ('Q', False), 'quiet': ('q', False), 'recurse:': ('R', False),
+    'recurse': ('r', False), 'size': ('S', False), 'symlinks': ('s', False),
+    'partial-only': ('T', False), 'no-change-check': ('t', False),
+    'no-trav-check': ('U', False), 'print-unique': ('u', False), 'version': ('v', False),
+    'ext-filter': ('X', True), 'hash-db': ('y', True), 'hash-db-populate': ('Y', True),
+    'soft-abort': ('Z', False), 'zero-match': ('z', False),
 }
-FORBIDDEN_LONG_OPTIONS = set(FORBIDDEN_SHORT_OPTIONS.values())
-# jdupes options that take a value, as `-X value`, `-Xvalue`, `--ext-filter value`
-# or `--ext-filter=value`.
-SHORT_OPTIONS_WITH_VALUE = set('CoPXy')
-LONG_OPTIONS_WITH_VALUE = {'--chunk-size', '--order', '--print', '--ext-filter', '--hash-db'}
+JDUPES_SHORT_OPTIONS_WITH_VALUE = set('bCoPXy')
+LONG_OPTION_NAMES = {letter: '--' + name for name, (letter, _) in JDUPES_LONG_OPTIONS.items()}
+# The jdupes options that can be passed through --jdupes-extra-args: those that only
+# affect which files are compared and how. All others are rejected, because they make
+# jdupes act on the duplicates itself (bypassing the sidecar files), change the output
+# this script parses, make matches unsafe to delete, or are unknown.
+ALLOWED_OPTIONS = set('@01ACHiIoOpqQrstUXyzZ')
+
+# Signals that are held back while a duplicate is deleted and recorded.
+DEFERRED_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 class FatalError(Exception):
@@ -73,7 +78,7 @@ def parse_args(argv=None):
     parser.add_argument('--jdupes-path', default='jdupes', help='Path to the jdupes binary (default: jdupes)')
     parser.add_argument('--jdupes-hashdb', help='Path to the hash database file to be used by jdupes')
     parser.add_argument('--jdupes-extra-args', default='',
-                        help='Extra arguments to pass to jdupes, e.g. "--no-hidden --zero-match"')
+                        help='Extra arguments to pass to jdupes, e.g. --jdupes-extra-args="--no-hidden --zero-match"')
     # Former name of --jdupes-extra-args.
     parser.add_argument('--jdupes-extra-cmds', dest='jdupes_extra_args', help=argparse.SUPPRESS)
     parser.add_argument('--sidecar-extension', default='.dupes',
@@ -107,17 +112,17 @@ def parse_args(argv=None):
 
 def split_options(extra_args):
     """
-    List the options in arguments meant for jdupes, without their values.
+    Work out which jdupes options a list of arguments selects, reading them as jdupes does.
 
     Args:
         extra_args (list): jdupes arguments, already split into words.
 
     Returns:
-        list: A letter for each short option (a group like -rQ gives 'r' and 'Q') and
-        the name of each long option (such as '--quick').
+        list: The short option letter of each option given (a group like -rQ gives 'r'
+        and 'Q'; --quick and its abbreviations give 'Q').
 
     Raises:
-        ValueError: If an argument is not an option.
+        ValueError: If an argument is not a jdupes option, or an option's value is missing.
     """
     options = []
     args = iter(extra_args)
@@ -125,16 +130,25 @@ def split_options(extra_args):
         if not arg.startswith('-') or arg in ('-', '--'):
             raise ValueError(f"{arg!r} is not an option; pass directories as positional arguments instead")
         if arg.startswith('--'):
-            name, has_value, _ = arg.partition('=')
-            options.append(name)
-            if name in LONG_OPTIONS_WITH_VALUE and not has_value:
-                next(args, None)
+            name, has_value, _ = arg[2:].partition('=')
+            # Like jdupes (getopt_long), take an exact name or else an unambiguous abbreviation.
+            matches = [name] if name in JDUPES_LONG_OPTIONS else [
+                option for option in JDUPES_LONG_OPTIONS if option.startswith(name)]
+            if len(matches) != 1:
+                raise ValueError(f"{arg} is {'an ambiguous' if matches else 'not a'} jdupes option")
+            letter, takes_value = JDUPES_LONG_OPTIONS[matches[0]]
+            if has_value and not takes_value:
+                raise ValueError(f"{arg}: --{matches[0]} does not take a value")
+            if takes_value and not has_value and next(args, None) is None:
+                raise ValueError(f"{arg} needs a value")
+            options.append(letter)
             continue
         for position, letter in enumerate(arg[1:], start=1):
             options.append(letter)
-            if letter in SHORT_OPTIONS_WITH_VALUE:
-                if position == len(arg) - 1:
-                    next(args, None)
+            if letter in JDUPES_SHORT_OPTIONS_WITH_VALUE:
+                # The rest of the word is the value, or else the next word is.
+                if position == len(arg) - 1 and next(args, None) is None:
+                    raise ValueError(f"-{letter} needs a value")
                 break
     return options
 
@@ -145,16 +159,10 @@ def check_extra_args(extra_args):
         options = split_options(extra_args)
     except ValueError as e:
         return str(e)
-    for option in options:
-        if option in FORBIDDEN_SHORT_OPTIONS:
-            option = f"-{option} ({FORBIDDEN_SHORT_OPTIONS[option]})"
-        elif option in FORBIDDEN_LONG_OPTIONS:
-            pass
-        # jdupes also accepts unambiguous abbreviations of long options (--del for --delete).
-        elif option in LONG_OPTIONS_WITH_VALUE or not any(
-                forbidden.startswith(option) for forbidden in FORBIDDEN_LONG_OPTIONS):
-            continue
-        return f"{option} is not supported because this script must control jdupes' actions and output"
+    for letter in options:
+        if letter not in ALLOWED_OPTIONS:
+            name = f" ({LONG_OPTION_NAMES[letter]})" if letter in LONG_OPTION_NAMES else ""
+            return f"-{letter}{name} is not supported because this script must control jdupes' actions and output"
     return None
 
 
@@ -202,8 +210,8 @@ def parse_jdupes_output(output):
     """
     *entries, trailer = output.split(b'\0')
     # Text after the last NUL is not a path. jdupes prints "No duplicates found." there
-    # when nothing matched; with matches, anything but whitespace means we misread the output.
-    if entries and trailer.strip():
+    # when nothing matched; anything else (such as help text) means we misread the output.
+    if trailer.strip() not in ((b'',) if entries else (b'', b'No duplicates found.')):
         raise FatalError(f"Unexpected output from jdupes: {trailer[:200]!r}")
     match_sets, current = [], []
     for entry in entries:
@@ -217,6 +225,18 @@ def parse_jdupes_output(output):
     return match_sets
 
 
+def canonical_path(path):
+    """
+    Return an absolute path to the same directory entry, with symlinked directories resolved.
+
+    Unlike os.path.abspath, this resolves symlinks before '..', as the kernel does:
+    'link/../f' is not necessarily './f'. The last component is kept as it is, so a
+    path to a symlink still names the symlink.
+    """
+    directory, name = os.path.split(os.path.join(os.getcwd(), path))
+    return os.path.join(os.path.realpath(directory), name)
+
+
 def order_by_priority(paths, directories):
     """
     Order paths by the position of the directory they are in.
@@ -226,16 +246,16 @@ def order_by_priority(paths, directories):
         directories (list): Directory paths in priority order.
 
     Returns:
-        list: Absolute paths, each listed once. Paths in the same directory keep their
-        relative order; paths outside every directory come last.
+        list: Canonical paths (see canonical_path), each listed once. Paths in the same
+        directory keep their relative order; paths outside every directory come last.
     """
     # A path belongs to the first directory that contains it, so overlapping directories
     # (or one directory given twice) never list a file twice. Listing the kept file
     # again as a duplicate would delete every copy.
-    roots = [os.path.abspath(d) for d in directories]
+    roots = [os.path.realpath(d) for d in directories]
     ranked = {}
     for path in paths:
-        path = os.path.abspath(path)
+        path = canonical_path(path)
         if path not in ranked:
             ranked[path] = next((rank for rank, root in enumerate(roots)
                                  if path == root or path.startswith(os.path.join(root, ''))), len(roots))
@@ -243,26 +263,69 @@ def order_by_priority(paths, directories):
     return sorted(ranked, key=ranked.get)
 
 
+# What must stay the same for a file to count as unchanged.
+FileState = collections.namedtuple('FileState', 'dev ino size mtime_ns')
+
+
+def file_state(stat_result):
+    return FileState(stat_result.st_dev, stat_result.st_ino, stat_result.st_size, stat_result.st_mtime_ns)
+
+
+def snapshot(paths):
+    """Record the state of files, to notice later if they changed. Missing files map to None."""
+    states = {}
+    for path in paths:
+        try:
+            states[path] = file_state(os.stat(path))
+        except OSError:
+            states[path] = None
+    return states
+
+
 def read_sidecar(path):
-    """Return the entries of a sidecar file as a list of bytes."""
+    """
+    Read a sidecar file.
+
+    Returns:
+        bytes: Its contents, or None if it does not look like a sidecar file (one absolute
+        path on each line).
+    """
     with open(path, 'rb') as f:
-        return [line for line in f.read().split(b'\n') if line]
+        data = f.read()
+    lines = data.split(b'\n')
+    if lines.pop() != b'' or not all(line.startswith(b'/') for line in lines):
+        return None
+    return data
 
 
-def deletion_problem(dupe, dupe_stat, keep_stat):
-    """Return why a duplicate must not be deleted, or None if it can be."""
-    if '\n' in dupe:
-        return "its path contains a newline, which cannot be recorded in a sidecar file"
-    if dupe_stat.st_size != keep_stat.st_size:
-        return "its size differs from the kept file's, so a file changed after jdupes scanned it"
-    return None
+@contextlib.contextmanager
+def signals_deferred():
+    """Hold back Ctrl-C and termination signals until the block has finished."""
+    received = []
+    previous = {signum: signal.signal(signum, lambda number, frame: received.append(number))
+                for signum in DEFERRED_SIGNALS}
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+        if received:
+            signal.raise_signal(received[0])
 
 
-def process_set(keep, dupes, args, report):
+def process_set(keep, dupes, args, report, scan):
     """
     Delete the duplicates of one file and record them in its sidecar file.
 
     In dry run mode, only describe what would be done, in `report`.
+
+    Args:
+        keep (str): The file to keep.
+        dupes (list): Its duplicates, to delete.
+        args: The parsed command line.
+        report (list): Lines of the dry run report, to add to.
+        scan (dict): The state of every file in every match set right after the scan,
+            from snapshot().
 
     Returns:
         tuple: (number of duplicates deleted, number of problems encountered).
@@ -279,13 +342,22 @@ def process_set(keep, dupes, args, report):
         if args.dry_run:
             report.append(f"Would skip duplicate file: {path} ({reason})")
 
+    def skip_set(reason):
+        log.error(f"Skipping the duplicates of {keep}: {reason}")
+        if args.dry_run:
+            report.extend([f"Would skip the duplicates of {keep}: {reason}", ""])
+        return 0, problems + 1
+
     try:
         keep_stat = os.stat(keep)
     except OSError as e:
-        log.error(f"Skipping the duplicates of {keep}: cannot access it: {e.strerror}")
-        if args.dry_run:
-            report.extend([f"Would skip the duplicates of {keep}: cannot access it: {e.strerror}", ""])
-        return 0, 1
+        return skip_set(f"cannot access it: {e.strerror}")
+    if file_state(keep_stat) != scan.get(keep):
+        return skip_set("it changed after the scan")
+    # Only possible with --no-exclude-sidecar: the sidecar file would overwrite or be
+    # mixed up with a file that is being deduplicated itself.
+    if sidecar in scan:
+        return skip_set(f"its sidecar file {sidecar} is one of the duplicates found")
     if args.dry_run:
         report.append(f"Would keep file: {keep}")
 
@@ -305,21 +377,33 @@ def process_set(keep, dupes, args, report):
             if args.dry_run:
                 report.append(f"Would not delete {dupe}: it is the same file as the kept file")
             continue
-        problem = deletion_problem(dupe, dupe_stat, keep_stat)
-        if problem:
-            skip(dupe, problem)
+        if '\n' in dupe:
+            skip(dupe, "its path contains a newline, which cannot be recorded in a sidecar file")
             continue
-        lines = [os.fsencode(dupe)]
+        if dupe_stat.st_size != keep_stat.st_size:
+            skip(dupe, "its size differs from the kept file's, so one of them changed during the scan")
+            continue
+        if file_state(dupe_stat) != scan.get(dupe):
+            skip(dupe, "it changed after the scan")
+            continue
+        record = os.fsencode(dupe) + b'\n'
         dupe_sidecar = dupe + ext
         if merge and os.path.lexists(dupe_sidecar):
+            if dupe_sidecar in scan:
+                skip(dupe, f"its sidecar file {dupe_sidecar} is one of the duplicates found")
+                continue
             try:
-                lines += read_sidecar(dupe_sidecar)
+                contents = read_sidecar(dupe_sidecar)
             except OSError as e:
                 skip(dupe, f"cannot read its sidecar file {dupe_sidecar}: {e.strerror}")
                 continue
+            if contents is None:
+                skip(dupe, f"{dupe_sidecar} does not look like a sidecar file, so it cannot be merged")
+                continue
+            record += contents
         else:
             dupe_sidecar = None
-        entries.append((dupe, dupe_sidecar, lines))
+        entries.append((dupe, dupe_sidecar, record))
 
     if not entries:
         if args.dry_run:
@@ -335,7 +419,7 @@ def process_set(keep, dupes, args, report):
                 report.append(f"Would {verb} sidecar file: {dupe_sidecar}")
         verb = 'append to' if os.path.lexists(sidecar) else 'create'
         report.append(f"Would {verb} sidecar file: {sidecar} with contents:")
-        report.extend(f"  {os.fsdecode(line)}" for _, _, lines in entries for line in lines)
+        report.extend(f"  {os.fsdecode(line)}" for _, _, record in entries for line in record[:-1].split(b'\n'))
         report.append("")
         return len(entries), problems
 
@@ -345,23 +429,24 @@ def process_set(keep, dupes, args, report):
     try:
         sidecar_file = open(sidecar, 'ab')
     except OSError as e:
-        log.error(f"Skipping the duplicates of {keep}: cannot open sidecar file {sidecar}: {e.strerror}")
-        return 0, problems + 1
+        return skip_set(f"cannot open sidecar file {sidecar}: {e.strerror}")
 
     deleted, merged_sidecars = [], []
     try:
         with sidecar_file:
-            for dupe, dupe_sidecar, lines in entries:
-                try:
-                    os.remove(dupe)
-                except OSError as e:
-                    log.error(f"Error deleting {dupe}: {e.strerror}")
-                    problems += 1
-                    continue
-                deleted.append(dupe)
+            for dupe, dupe_sidecar, record in entries:
+                # Ctrl-C between deleting a file and recording it would lose the record.
+                with signals_deferred():
+                    try:
+                        os.remove(dupe)
+                    except OSError as e:
+                        log.error(f"Error deleting {dupe}: {e.strerror}")
+                        problems += 1
+                        continue
+                    deleted.append(dupe)
+                    sidecar_file.write(record)
+                    sidecar_file.flush()
                 log.info(f"Deleted duplicate file: {dupe}")
-                sidecar_file.write(b''.join(line + b'\n' for line in lines))
-                sidecar_file.flush()
                 if dupe_sidecar:
                     merged_sidecars.append(dupe_sidecar)
     except OSError as e:
@@ -432,12 +517,13 @@ def write_report(report, output):
 
 def run(args):
     for directory in args.directories:
-        if not os.path.exists(directory):
-            raise FatalError(f"No such file or directory: {directory}")
+        # jdupes skips file arguments with only a warning, so insist on directories.
+        if not os.path.isdir(directory):
+            raise FatalError(f"Not a directory: {directory}")
 
     if args.dry_run:
         print("Dry run mode: No files will be deleted or modified.")
-    if any(option in ('Q', '--quick') for option in split_options(args.jdupes_extra_args)):
+    if 'Q' in split_options(args.jdupes_extra_args):
         log.warning("Warning: --quick skips jdupes' byte-for-byte comparison; "
                     "a hash collision could delete a file that is not a duplicate.")
 
@@ -447,6 +533,7 @@ def run(args):
         ordered = order_by_priority(paths, args.directories)
         if len(ordered) > 1:
             plans.append((ordered[0], ordered[1:]))
+    scan = snapshot(path for keep, dupes in plans for path in [keep] + dupes)
 
     if not plans:
         print("No duplicates found.")
@@ -457,10 +544,8 @@ def run(args):
     total_dupes, total_bytes = 0, 0
     for keep, dupes in plans:
         total_dupes += len(dupes)
-        try:
-            total_bytes += os.stat(keep).st_size * len(dupes)
-        except OSError:
-            pass
+        if scan[keep]:
+            total_bytes += scan[keep].size * len(dupes)
     print(f"Found {plural(len(plans), 'set')} of duplicates: {plural(total_dupes, 'file')} to delete, "
           f"reclaiming up to {format_size(total_bytes)}.")
 
@@ -480,7 +565,7 @@ def run(args):
 
     report, deleted, problems = [], 0, 0
     for keep, dupes in plans:
-        set_deleted, set_problems = process_set(keep, dupes, args, report)
+        set_deleted, set_problems = process_set(keep, dupes, args, report, scan)
         deleted += set_deleted
         problems += set_problems
         if progress:
